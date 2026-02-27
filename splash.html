@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Florence's Splash</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #1a1a2e;
+    cursor: none;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #bg {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+  }
+  #paint-canvas {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+  #overlay-canvas {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 2;
+  }
+  #start-screen {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(10, 10, 30, 0.92);
+    transition: opacity 0.6s ease;
+  }
+  #start-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  #start-screen h1 {
+    font-family: 'Arial Rounded MT Bold', 'Nunito', Arial, sans-serif;
+    font-size: clamp(3rem, 8vw, 7rem);
+    color: #fff;
+    text-shadow:
+      4px 4px 0 #ff6b9d,
+      -2px -2px 0 #c44dff,
+      0 0 40px rgba(255, 107, 157, 0.5),
+      0 0 80px rgba(196, 77, 255, 0.3);
+    letter-spacing: 0.02em;
+    text-align: center;
+    margin-bottom: 1.5rem;
+    animation: titleBounce 2s ease-in-out infinite;
+  }
+  #start-screen p {
+    font-family: Arial, sans-serif;
+    font-size: clamp(1rem, 3vw, 1.8rem);
+    color: rgba(255,255,255,0.7);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .corner-splat {
+    position: absolute;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    filter: blur(2px);
+  }
+  .corner-splat:nth-child(1) { top: 8%; left: 6%; background: radial-gradient(circle, #ff6b6b, transparent 70%); }
+  .corner-splat:nth-child(2) { top: 5%; right: 8%; background: radial-gradient(circle, #ffd93d, transparent 70%); }
+  .corner-splat:nth-child(3) { bottom: 10%; left: 10%; background: radial-gradient(circle, #6bcb77, transparent 70%); }
+  .corner-splat:nth-child(4) { bottom: 8%; right: 6%; background: radial-gradient(circle, #4d96ff, transparent 70%); }
+  @keyframes titleBounce {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-10px) scale(1.03); }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="bg"></canvas>
+  <canvas id="paint-canvas"></canvas>
+  <canvas id="overlay-canvas"></canvas>
+
+  <div id="start-screen">
+    <div class="corner-splat"></div>
+    <div class="corner-splat"></div>
+    <div class="corner-splat"></div>
+    <div class="corner-splat"></div>
+    <h1>Florence's Splash</h1>
+    <p>Press any key to start!</p>
+  </div>
+
+<script>
+// ======================================================
+// Florence's Splash - A paint game for toddlers
+// ======================================================
+
+// --- Keyboard Zones ---
+const ZONES = {
+  left: new Set(['Escape','F1','F2','F3','F4','Backquote','Digit1','Digit2','Digit3','Digit4','Digit5','Tab','KeyQ','KeyW','KeyE','KeyR','KeyT','CapsLock','KeyA','KeyS','KeyD','KeyF','KeyG','ShiftLeft','KeyZ','KeyX','KeyC','KeyV','KeyB','ControlLeft','MetaLeft','AltLeft']),
+  right: new Set(['F5','F6','F7','F8','F9','F10','F11','F12','Digit6','Digit7','Digit8','Digit9','Digit0','Minus','Equal','Backspace','KeyY','KeyU','KeyI','KeyO','KeyP','BracketLeft','BracketRight','KeyH','KeyJ','KeyK','KeyL','Semicolon','Quote','Backslash','Enter','KeyN','KeyM','Comma','Period','Slash','ShiftRight','ControlRight']),
+  space: new Set(['Space','AltRight','MetaRight','ContextMenu']),
+  special: new Set(['Insert','Home','End','PageUp','PageDown','Delete','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','NumLock','NumpadDivide','NumpadMultiply','NumpadSubtract','Numpad7','Numpad8','Numpad9','NumpadAdd','Numpad4','Numpad5','Numpad6','Numpad1','Numpad2','Numpad3','NumpadEnter','Numpad0','NumpadDecimal','PrintScreen','ScrollLock','Pause']),
+};
+
+function getZone(code) {
+  for (const [zone, keys] of Object.entries(ZONES)) {
+    if (keys.has(code)) return zone;
+  }
+  return 'left'; // default fallback
+}
+
+// --- Canvas Setup ---
+const bgCanvas = document.getElementById('bg');
+const paintCanvas = document.getElementById('paint-canvas');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+const paintCtx = paintCanvas.getContext('2d');
+const overlayCtx = overlayCanvas.getContext('2d');
+
+let W, H;
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+
+  // For the background and overlay, we can just resize directly
+  bgCanvas.width = W; bgCanvas.height = H;
+  overlayCanvas.width = W; overlayCanvas.height = H;
+
+  // For the paint canvas, preserve existing content
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = paintCanvas.width;
+  tempCanvas.height = paintCanvas.height;
+  const tempCtx = tempCanvas.getContext('2d');
+  tempCtx.drawImage(paintCanvas, 0, 0);
+
+  paintCanvas.width = W;
+  paintCanvas.height = H;
+  paintCtx.drawImage(tempCanvas, 0, 0);
+
+  drawBackground();
+}
+
+function drawBackground() {
+  // Soft pastel gradient background
+  const grad = bgCtx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#fdf6f0');
+  grad.addColorStop(0.3, '#f0f4fd');
+  grad.addColorStop(0.6, '#fdf0f6');
+  grad.addColorStop(1, '#f0fdf4');
+  bgCtx.fillStyle = grad;
+  bgCtx.fillRect(0, 0, W, H);
+
+  // Paper texture using subtle noise
+  const imageData = bgCtx.getImageData(0, 0, W, H);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const noise = (Math.random() - 0.5) * 12;
+    data[i] += noise;
+    data[i + 1] += noise;
+    data[i + 2] += noise;
+  }
+  bgCtx.putImageData(imageData, 0, 0);
+
+  // Subtle fiber lines for paper feel
+  bgCtx.save();
+  bgCtx.globalAlpha = 0.03;
+  for (let i = 0; i < 200; i++) {
+    bgCtx.strokeStyle = Math.random() > 0.5 ? '#8a7a6a' : '#a09080';
+    bgCtx.lineWidth = Math.random() * 0.5 + 0.2;
+    bgCtx.beginPath();
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const len = Math.random() * 30 + 5;
+    const angle = Math.random() * Math.PI;
+    bgCtx.moveTo(x, y);
+    bgCtx.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len);
+    bgCtx.stroke();
+  }
+  bgCtx.restore();
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+// --- Audio Engine ---
+let audioCtx = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+const MASTER_VOLUME = 0.15;
+
+// Pentatonic scale frequencies for melodic sounds
+const PENTATONIC = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
+
+function playSound(zone) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+
+  if (zone === 'left') {
+    // Squelchy splat - noise burst through low-pass
+    const bufferSize = audioCtx.sampleRate * 0.15;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.15));
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, now);
+    filter.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+    filter.Q.value = 8;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(MASTER_VOLUME, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start(now);
+    source.stop(now + 0.2);
+  }
+  else if (zone === 'right') {
+    // Crisp pop - quick sine with fast decay
+    const freq = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)];
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + 0.08);
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(MASTER_VOLUME, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+  else if (zone === 'space') {
+    // Ascending whoosh - filtered noise sweep
+    const bufferSize = audioCtx.sampleRate * 0.5;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * i / bufferSize);
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(300, now);
+    filter.frequency.exponentialRampToValueAtTime(3000, now + 0.4);
+    filter.Q.value = 2;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(MASTER_VOLUME * 0.7, now);
+    gain.gain.linearRampToValueAtTime(MASTER_VOLUME, now + 0.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start(now);
+    source.stop(now + 0.5);
+  }
+  else if (zone === 'special') {
+    // Sparkly tinkle - high sine with shimmer
+    const freq = PENTATONIC[Math.floor(Math.random() * PENTATONIC.length)] * 2;
+    for (let i = 0; i < 3; i++) {
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      const detune = (Math.random() - 0.5) * 30;
+      osc.frequency.setValueAtTime(freq * (1 + i * 0.25), now + i * 0.04);
+      osc.detune.value = detune;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0, now + i * 0.04);
+      gain.gain.linearRampToValueAtTime(MASTER_VOLUME * 0.6, now + i * 0.04 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3 + i * 0.1);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now + i * 0.04);
+      osc.stop(now + 0.4 + i * 0.1);
+    }
+  }
+}
+
+// --- Colour Palettes ---
+function warmColour() {
+  // Reds, oranges, yellows
+  const h = Math.random() * 60 - 10; // -10 to 50
+  const s = 70 + Math.random() * 30;
+  const l = 45 + Math.random() * 25;
+  return `hsl(${(h + 360) % 360}, ${s}%, ${l}%)`;
+}
+
+function coolColour() {
+  // Blues, purples, teals
+  const h = 180 + Math.random() * 120; // 180 to 300
+  const s = 60 + Math.random() * 35;
+  const l = 40 + Math.random() * 30;
+  return `hsl(${h}, ${s}%, ${l}%)`;
+}
+
+function glitterColour() {
+  // Gold, silver, pastels
+  const choices = [
+    () => `hsl(45, ${70 + Math.random()*30}%, ${60 + Math.random()*25}%)`,  // gold
+    () => `hsl(0, 0%, ${75 + Math.random()*20}%)`,                          // silver
+    () => `hsl(${Math.random()*360}, ${40+Math.random()*30}%, ${75+Math.random()*15}%)`, // pastel
+  ];
+  return choices[Math.floor(Math.random() * choices.length)]();
+}
+
+// --- Paint Effects ---
+
+// LEFT ZONE: Big Splats
+function drawSplat(x, y) {
+  const ctx = paintCtx;
+  const baseRadius = 30 + Math.random() * 60;
+  const colour = warmColour();
+
+  ctx.save();
+
+  // Main splat: overlapping irregular circles
+  const numBlobs = 8 + Math.floor(Math.random() * 8);
+  for (let i = 0; i < numBlobs; i++) {
+    const angle = (Math.PI * 2 * i) / numBlobs + (Math.random() - 0.5) * 0.8;
+    const dist = Math.random() * baseRadius * 0.6;
+    const bx = x + Math.cos(angle) * dist;
+    const by = y + Math.sin(angle) * dist;
+    const r = baseRadius * (0.3 + Math.random() * 0.7);
+
+    const grad = ctx.createRadialGradient(bx, by, 0, bx, by, r);
+    grad.addColorStop(0, colour);
+    grad.addColorStop(0.7, colour);
+    grad.addColorStop(1, 'transparent');
+
+    ctx.globalAlpha = 0.5 + Math.random() * 0.4;
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(bx, by, r, r * (0.7 + Math.random() * 0.6), Math.random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Drips
+  const numDrips = 2 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < numDrips; i++) {
+    const dx = x + (Math.random() - 0.5) * baseRadius;
+    const dripLength = 20 + Math.random() * 80;
+    const dripWidth = 2 + Math.random() * 5;
+
+    ctx.globalAlpha = 0.5 + Math.random() * 0.3;
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.ellipse(dx, y + baseRadius * 0.3 + dripLength / 2, dripWidth, dripLength / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Drip end blob
+    ctx.beginPath();
+    ctx.arc(dx, y + baseRadius * 0.3 + dripLength, dripWidth * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Splatter droplets around main splat
+  const numDroplets = 5 + Math.floor(Math.random() * 10);
+  for (let i = 0; i < numDroplets; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = baseRadius + Math.random() * baseRadius * 1.2;
+    const dx = x + Math.cos(angle) * dist;
+    const dy = y + Math.sin(angle) * dist;
+    const dr = 1 + Math.random() * 4;
+
+    ctx.globalAlpha = 0.6 + Math.random() * 0.4;
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.arc(dx, dy, dr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  // Animate splat expansion on overlay
+  animateSplatBurst(x, y, colour, baseRadius);
+}
+
+function animateSplatBurst(x, y, colour, radius) {
+  const particles = [];
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      r: 2 + Math.random() * 4,
+      life: 1,
+      decay: 0.02 + Math.random() * 0.03,
+      colour,
+    });
+  }
+  overlayAnimations.push({ type: 'particles', particles });
+}
+
+// RIGHT ZONE: Stamps & Shapes
+function drawStamp(x, y) {
+  const ctx = paintCtx;
+  const size = 25 + Math.random() * 45;
+  const colour = coolColour();
+  const rotation = (Math.random() - 0.5) * 0.6;
+  const shapes = ['star', 'heart', 'circle', 'triangle', 'diamond'];
+  const shape = shapes[Math.floor(Math.random() * shapes.length)];
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.fillStyle = colour;
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 2;
+
+  switch (shape) {
+    case 'star':
+      drawStar(ctx, 0, 0, 5, size, size * 0.45);
+      break;
+    case 'heart':
+      drawHeart(ctx, 0, 0, size);
+      break;
+    case 'circle':
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    case 'triangle':
+      drawTriangle(ctx, 0, 0, size);
+      break;
+    case 'diamond':
+      drawDiamond(ctx, 0, 0, size);
+      break;
+  }
+
+  ctx.restore();
+
+  // Pop animation on overlay
+  animateStampPop(x, y, colour, size);
+}
+
+function drawStar(ctx, cx, cy, spikes, outerR, innerR) {
+  ctx.beginPath();
+  for (let i = 0; i < spikes * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = (Math.PI * i) / spikes - Math.PI / 2;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawHeart(ctx, cx, cy, size) {
+  const s = size * 0.6;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.3);
+  ctx.bezierCurveTo(cx, cy - s * 0.3, cx - s, cy - s * 0.3, cx - s, cy + s * 0.1);
+  ctx.bezierCurveTo(cx - s, cy + s * 0.6, cx, cy + s * 0.9, cx, cy + s);
+  ctx.bezierCurveTo(cx, cy + s * 0.9, cx + s, cy + s * 0.6, cx + s, cy + s * 0.1);
+  ctx.bezierCurveTo(cx + s, cy - s * 0.3, cx, cy - s * 0.3, cx, cy + s * 0.3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawTriangle(ctx, cx, cy, size) {
+  const s = size * 0.7;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - s);
+  ctx.lineTo(cx - s * 0.866, cy + s * 0.5);
+  ctx.lineTo(cx + s * 0.866, cy + s * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawDiamond(ctx, cx, cy, size) {
+  const s = size * 0.7;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - s);
+  ctx.lineTo(cx + s * 0.6, cy);
+  ctx.lineTo(cx, cy + s);
+  ctx.lineTo(cx - s * 0.6, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function animateStampPop(x, y, colour, size) {
+  overlayAnimations.push({
+    type: 'ring',
+    x, y,
+    radius: size * 0.5,
+    maxRadius: size * 1.5,
+    colour,
+    life: 1,
+    decay: 0.04,
+  });
+}
+
+// SPACE BAR: Rainbow Streaks
+let rainbowHueOffset = 0;
+
+function drawRainbowStreak() {
+  const ctx = paintCtx;
+  // Random start and end with a curve
+  const startX = Math.random() * W;
+  const startY = Math.random() * H;
+  const endX = Math.random() * W;
+  const endY = Math.random() * H;
+
+  // Control points for bezier curve
+  const cp1x = startX + (Math.random() - 0.5) * W * 0.5;
+  const cp1y = startY + (Math.random() - 0.5) * H * 0.5;
+  const cp2x = endX + (Math.random() - 0.5) * W * 0.5;
+  const cp2y = endY + (Math.random() - 0.5) * H * 0.5;
+
+  // Draw multiple strokes with offset for rainbow effect
+  const numStripes = 7;
+  const stripeWidth = 4 + Math.random() * 4;
+  const totalWidth = numStripes * stripeWidth;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (let i = 0; i < numStripes; i++) {
+    const hue = (rainbowHueOffset + (i / numStripes) * 360) % 360;
+    ctx.strokeStyle = `hsl(${hue}, 85%, 55%)`;
+    ctx.lineWidth = stripeWidth;
+    ctx.globalAlpha = 0.7;
+
+    // Offset each stripe perpendicular to the general direction
+    const angle = Math.atan2(endY - startY, endX - startX) + Math.PI / 2;
+    const offset = (i - numStripes / 2) * stripeWidth * 0.8;
+    const ox = Math.cos(angle) * offset;
+    const oy = Math.sin(angle) * offset;
+
+    ctx.beginPath();
+    ctx.moveTo(startX + ox, startY + oy);
+    ctx.bezierCurveTo(
+      cp1x + ox, cp1y + oy,
+      cp2x + ox, cp2y + oy,
+      endX + ox, endY + oy
+    );
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  rainbowHueOffset = (rainbowHueOffset + 15) % 360;
+
+  // Whoosh animation on overlay
+  animateRainbowWhoosh(startX, startY, endX, endY);
+}
+
+function animateRainbowWhoosh(sx, sy, ex, ey) {
+  const particles = [];
+  const steps = 20;
+  for (let i = 0; i < steps; i++) {
+    const t = i / steps;
+    particles.push({
+      x: sx + (ex - sx) * t + (Math.random() - 0.5) * 30,
+      y: sy + (ey - sy) * t + (Math.random() - 0.5) * 30,
+      vx: (Math.random() - 0.5) * 2,
+      vy: (Math.random() - 0.5) * 2,
+      r: 1 + Math.random() * 3,
+      life: 1,
+      decay: 0.03 + Math.random() * 0.02,
+      colour: `hsl(${(rainbowHueOffset + t * 360) % 360}, 90%, 65%)`,
+    });
+  }
+  overlayAnimations.push({ type: 'particles', particles });
+}
+
+// SPECIAL KEYS: Glitter & Magic
+let florenceStampCounter = 0;
+
+function drawGlitter() {
+  // Sprinkle glitter particles
+  const numParticles = 30 + Math.floor(Math.random() * 30);
+  const glitterParticles = [];
+  for (let i = 0; i < numParticles; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const colour = glitterColour();
+    const size = 1 + Math.random() * 3;
+
+    // Draw permanent tiny dot on paint canvas
+    paintCtx.save();
+    paintCtx.globalAlpha = 0.6 + Math.random() * 0.4;
+    paintCtx.fillStyle = colour;
+    paintCtx.beginPath();
+    paintCtx.arc(x, y, size, 0, Math.PI * 2);
+    paintCtx.fill();
+    paintCtx.restore();
+
+    // Also create twinkle animation on overlay
+    glitterParticles.push({
+      x, y,
+      r: size,
+      life: 1,
+      decay: 0.01 + Math.random() * 0.02,
+      colour,
+      twinkleSpeed: 5 + Math.random() * 10,
+      twinklePhase: Math.random() * Math.PI * 2,
+    });
+  }
+  overlayAnimations.push({ type: 'glitter', particles: glitterParticles });
+
+  // Occasionally stamp "FLORENCE"
+  florenceStampCounter++;
+  if (florenceStampCounter % 3 === 0) {
+    drawFlorenceName();
+  }
+}
+
+function drawFlorenceName() {
+  const ctx = paintCtx;
+  const x = W * 0.1 + Math.random() * W * 0.8;
+  const y = H * 0.15 + Math.random() * H * 0.7;
+  const size = 24 + Math.random() * 48;
+  const rotation = (Math.random() - 0.5) * 0.4;
+  const colour = glitterColour();
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.font = `bold ${size}px 'Arial Rounded MT Bold', Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Shadow/outline
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 3;
+  ctx.strokeText('FLORENCE', 0, 0);
+
+  // Fill with sparkly gradient
+  const grad = ctx.createLinearGradient(-size * 2, 0, size * 2, 0);
+  grad.addColorStop(0, colour);
+  grad.addColorStop(0.5, glitterColour());
+  grad.addColorStop(1, colour);
+  ctx.fillStyle = grad;
+  ctx.fillText('FLORENCE', 0, 0);
+
+  ctx.restore();
+
+  // Sparkle burst around name
+  const nameGlitter = [];
+  for (let i = 0; i < 15; i++) {
+    nameGlitter.push({
+      x: x + (Math.random() - 0.5) * size * 5,
+      y: y + (Math.random() - 0.5) * size * 1.5,
+      r: 1 + Math.random() * 2,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.015,
+      colour: glitterColour(),
+      twinkleSpeed: 8 + Math.random() * 8,
+      twinklePhase: Math.random() * Math.PI * 2,
+    });
+  }
+  overlayAnimations.push({ type: 'glitter', particles: nameGlitter });
+}
+
+// --- Overlay Animations ---
+let overlayAnimations = [];
+
+function updateOverlay(dt) {
+  overlayCtx.clearRect(0, 0, W, H);
+
+  for (let i = overlayAnimations.length - 1; i >= 0; i--) {
+    const anim = overlayAnimations[i];
+    let alive = false;
+
+    if (anim.type === 'particles') {
+      for (const p of anim.particles) {
+        if (p.life <= 0) continue;
+        alive = true;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1; // gravity
+        p.life -= p.decay;
+
+        overlayCtx.save();
+        overlayCtx.globalAlpha = Math.max(0, p.life);
+        overlayCtx.fillStyle = p.colour;
+        overlayCtx.beginPath();
+        overlayCtx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+        overlayCtx.fill();
+        overlayCtx.restore();
+      }
+    }
+    else if (anim.type === 'ring') {
+      if (anim.life > 0) {
+        alive = true;
+        anim.radius += (anim.maxRadius - anim.radius) * 0.1;
+        anim.life -= anim.decay;
+
+        overlayCtx.save();
+        overlayCtx.globalAlpha = Math.max(0, anim.life) * 0.6;
+        overlayCtx.strokeStyle = anim.colour;
+        overlayCtx.lineWidth = 3 * anim.life;
+        overlayCtx.beginPath();
+        overlayCtx.arc(anim.x, anim.y, anim.radius, 0, Math.PI * 2);
+        overlayCtx.stroke();
+        overlayCtx.restore();
+      }
+    }
+    else if (anim.type === 'glitter') {
+      for (const p of anim.particles) {
+        if (p.life <= 0) continue;
+        alive = true;
+        p.life -= p.decay;
+
+        // Twinkle effect
+        const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(performance.now() * 0.01 * p.twinkleSpeed + p.twinklePhase));
+
+        overlayCtx.save();
+        overlayCtx.globalAlpha = Math.max(0, p.life) * twinkle;
+        overlayCtx.fillStyle = p.colour;
+        overlayCtx.shadowColor = p.colour;
+        overlayCtx.shadowBlur = 6;
+
+        // Draw as a 4-pointed star for sparkle
+        const r = p.r * (0.5 + twinkle * 0.5);
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(p.x, p.y - r * 2);
+        overlayCtx.lineTo(p.x + r * 0.5, p.y - r * 0.5);
+        overlayCtx.lineTo(p.x + r * 2, p.y);
+        overlayCtx.lineTo(p.x + r * 0.5, p.y + r * 0.5);
+        overlayCtx.lineTo(p.x, p.y + r * 2);
+        overlayCtx.lineTo(p.x - r * 0.5, p.y + r * 0.5);
+        overlayCtx.lineTo(p.x - r * 2, p.y);
+        overlayCtx.lineTo(p.x - r * 0.5, p.y - r * 0.5);
+        overlayCtx.closePath();
+        overlayCtx.fill();
+        overlayCtx.restore();
+      }
+    }
+    else if (anim.type === 'hint') {
+      if (anim.life > 0) {
+        alive = true;
+        anim.life -= anim.decay;
+        const twinkle = Math.abs(Math.sin(performance.now() * 0.005));
+
+        overlayCtx.save();
+        overlayCtx.globalAlpha = Math.max(0, anim.life) * twinkle * 0.5;
+        overlayCtx.fillStyle = '#fff';
+        overlayCtx.shadowColor = '#fff';
+        overlayCtx.shadowBlur = 15;
+        const r = 4;
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(anim.x, anim.y - r * 3);
+        overlayCtx.lineTo(anim.x + r, anim.y - r);
+        overlayCtx.lineTo(anim.x + r * 3, anim.y);
+        overlayCtx.lineTo(anim.x + r, anim.y + r);
+        overlayCtx.lineTo(anim.x, anim.y + r * 3);
+        overlayCtx.lineTo(anim.x - r, anim.y + r);
+        overlayCtx.lineTo(anim.x - r * 3, anim.y);
+        overlayCtx.lineTo(anim.x - r, anim.y - r);
+        overlayCtx.closePath();
+        overlayCtx.fill();
+        overlayCtx.restore();
+      }
+    }
+
+    if (!alive) {
+      overlayAnimations.splice(i, 1);
+    }
+  }
+}
+
+// --- Game State ---
+let started = false;
+let lastInputTime = 0;
+let hintTimeout = 30000; // 30 seconds
+let lastFrameTime = 0;
+
+// --- Animation Loop ---
+function gameLoop(timestamp) {
+  const dt = timestamp - lastFrameTime;
+  lastFrameTime = timestamp;
+
+  updateOverlay(dt);
+
+  // Idle hint
+  if (started && (timestamp - lastInputTime > hintTimeout)) {
+    // Add a subtle sparkle hint
+    overlayAnimations.push({
+      type: 'hint',
+      x: W * 0.2 + Math.random() * W * 0.6,
+      y: H * 0.2 + Math.random() * H * 0.6,
+      life: 1,
+      decay: 0.008,
+    });
+    lastInputTime = timestamp - hintTimeout + 3000; // next hint in 3 seconds
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+// --- Fullscreen ---
+function goFullscreen() {
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else if (el.msRequestFullscreen) el.msRequestFullscreen();
+}
+
+// --- Input Handling ---
+const startScreen = document.getElementById('start-screen');
+const pressedKeys = new Set();
+
+function handleKey(e) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  // Ignore held keys
+  if (pressedKeys.has(e.code)) return;
+  pressedKeys.add(e.code);
+
+  if (!started) {
+    started = true;
+    startScreen.classList.add('hidden');
+    initAudio();
+    goFullscreen();
+    lastInputTime = performance.now();
+    // Small delay so the start screen has time to fade
+    setTimeout(() => resize(), 100);
+    return;
+  }
+
+  lastInputTime = performance.now();
+
+  const zone = getZone(e.code);
+  playSound(zone);
+
+  const x = Math.random() * W;
+  const y = Math.random() * H;
+
+  switch (zone) {
+    case 'left':
+      drawSplat(x, y);
+      break;
+    case 'right':
+      drawStamp(x, y);
+      break;
+    case 'space':
+      drawRainbowStreak();
+      break;
+    case 'special':
+      drawGlitter();
+      break;
+  }
+}
+
+document.addEventListener('keydown', handleKey, { capture: true });
+document.addEventListener('keyup', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  pressedKeys.delete(e.code);
+}, { capture: true });
+
+// --- Toddler-proofing ---
+// Prevent context menu
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// Prevent common shortcuts
+document.addEventListener('keydown', function(e) {
+  // Block Ctrl/Cmd combos
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+  }
+  // Block F-keys browser behavior
+  if (e.key.startsWith('F') && e.key.length <= 3) {
+    e.preventDefault();
+  }
+  // Block Tab
+  if (e.key === 'Tab') {
+    e.preventDefault();
+  }
+  // Block Escape closing fullscreen (re-enter)
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    setTimeout(goFullscreen, 100);
+  }
+}, { capture: true });
+
+// Prevent mouse actions
+document.addEventListener('mousedown', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+// Prevent drag
+document.addEventListener('dragstart', e => e.preventDefault());
+
+// Prevent selection
+document.addEventListener('selectstart', e => e.preventDefault());
+
+// Handle visibility change - re-enter fullscreen when returning
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && started) {
+    setTimeout(goFullscreen, 200);
+  }
+});
+
+// Handle fullscreen change - if exited, try to re-enter
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && started) {
+    setTimeout(goFullscreen, 300);
+  }
+});
+</script>
+</body>
+</html>
