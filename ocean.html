@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Florence's Ocean</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: none; }
 </style>
 </head>
@@ -1751,7 +1751,7 @@ function drawStartScreen() {
   ctx.font = `${subSize}px "Comic Sans MS", "Chalkboard SE", cursive`;
   const pulse = 0.5 + Math.sin(time * 2) * 0.3;
   ctx.fillStyle = rgba(150, 220, 255, pulse);
-  ctx.fillText('Press any key to dive in!', tx, ty + titleSize * 1.2);
+  ctx.fillText('Press any key or tap to dive in!', tx, ty + titleSize * 1.2);
 
   // Small fish swimming across start screen
   const fishX = ((time * 60) % (canvas.width + 200)) - 100;
@@ -1846,6 +1846,53 @@ document.addEventListener('mousedown', (e) => {
     } catch (err) {}
   }
 });
+
+// --- Touch Handling ---
+function getTouchZone(touch) {
+  const x = touch.clientX;
+  const y = touch.clientY;
+  const midX = window.innerWidth / 2;
+  const midY = window.innerHeight / 2;
+  if (x < midX && y < midY) return 'left';     // top-left → fish
+  if (x >= midX && y < midY) return 'right';    // top-right → big creatures
+  if (x < midX && y >= midY) return 'space';    // bottom-left → bubbles
+  return 'special';                              // bottom-right → magic
+}
+
+document.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (!started) {
+    started = true;
+    initAudio();
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch (err) {}
+    return;
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  for (const touch of e.changedTouches) {
+    const zone = getTouchZone(touch);
+    playSound(zone);
+    switch (zone) {
+      case 'left': spawnFish(); break;
+      case 'right': spawnBigCreature(); break;
+      case 'space': spawnBubbles(); break;
+      case 'special': spawnMagic(); break;
+    }
+  }
+}, { passive: false });
+
+document.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+  e.preventDefault();
+}, { passive: false });
 
 // Prevent browser shortcuts
 window.addEventListener('beforeunload', (e) => {

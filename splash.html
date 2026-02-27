@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Florence's Splash</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -94,7 +94,7 @@
     <div class="corner-splat"></div>
     <div class="corner-splat"></div>
     <h1>Florence's Splash</h1>
-    <p>Press any key to start!</p>
+    <p>Press any key or tap to start!</p>
   </div>
 
 <script>
@@ -913,6 +913,77 @@ document.addEventListener('dragstart', e => e.preventDefault());
 
 // Prevent selection
 document.addEventListener('selectstart', e => e.preventDefault());
+
+// --- Touch Handling ---
+function getTouchZone(touch) {
+  const x = touch.clientX;
+  const y = touch.clientY;
+  const midX = W / 2;
+  const edgeSize = Math.min(W, H) * 0.15;
+  const bottomStrip = H * 0.8;
+  // Corners/edges → special (glitter)
+  if (x < edgeSize || x > W - edgeSize || y < edgeSize || y > H - edgeSize) {
+    return 'special';
+  }
+  // Bottom centre strip → space (rainbows)
+  if (y > bottomStrip) return 'space';
+  // Left half → left (splats)
+  if (x < midX) return 'left';
+  // Right half → right (stamps)
+  return 'right';
+}
+
+let activeTouches = {};
+
+function handleTouchTrigger(touch) {
+  lastInputTime = performance.now();
+  const zone = getTouchZone(touch);
+  playSound(zone);
+  const x = touch.clientX;
+  const y = touch.clientY;
+  switch (zone) {
+    case 'left': drawSplat(x, y); break;
+    case 'right': drawStamp(x, y); break;
+    case 'space': drawRainbowStreak(); break;
+    case 'special': drawGlitter(); break;
+  }
+}
+
+document.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (!started) {
+    started = true;
+    startScreen.classList.add('hidden');
+    initAudio();
+    goFullscreen();
+    lastInputTime = performance.now();
+    setTimeout(() => resize(), 100);
+    return;
+  }
+  for (const touch of e.changedTouches) {
+    activeTouches[touch.identifier] = getTouchZone(touch);
+    handleTouchTrigger(touch);
+  }
+}, { passive: false });
+
+document.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  // Continuous rainbow streaks while dragging in bottom strip
+  for (const touch of e.changedTouches) {
+    const zone = getTouchZone(touch);
+    if (zone === 'space') {
+      drawRainbowStreak();
+      playSound('space');
+    }
+  }
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  for (const touch of e.changedTouches) {
+    delete activeTouches[touch.identifier];
+  }
+}, { passive: false });
 
 // Handle visibility change - re-enter fullscreen when returning
 document.addEventListener('visibilitychange', () => {

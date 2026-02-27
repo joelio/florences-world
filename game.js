@@ -890,6 +890,39 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('keyup', (e) => { e.preventDefault(); });
 
+// ===== TOUCH HANDLING =====
+function getTouchZone(touch) {
+  const x = touch.clientX;
+  const y = touch.clientY;
+  const midX = window.innerWidth / 2;
+  const midY = window.innerHeight / 2;
+  if (x < midX && y < midY) return 'left';     // top-left → dinos
+  if (x >= midX && y < midY) return 'right';    // top-right → space
+  if (x < midX && y >= midY) return 'space';    // bottom-left → parade
+  return 'special';                              // bottom-right → magic
+}
+
+document.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (!started) {
+    started = true;
+    hideStartScreen();
+    enterFullscreen();
+    initAudio();
+  }
+  for (const touch of e.changedTouches) {
+    triggerZone(getTouchZone(touch));
+  }
+}, { passive: false });
+
+document.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+  e.preventDefault();
+}, { passive: false });
+
 function enterFullscreen() {
   const el = document.documentElement;
   if (el.requestFullscreen) el.requestFullscreen();
