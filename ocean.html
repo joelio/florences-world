@@ -1703,7 +1703,7 @@ function drawStartScreen() {
   for (let i = 0; i < 20; i++) {
     const bx = (Math.sin(time * 0.3 + i * 1.7) * 0.5 + 0.5) * canvas.width;
     const by = canvas.height - ((time * 20 + i * 80) % (canvas.height + 40));
-    const bs = 5 + Math.sin(i * 3.7) * 10;
+    const bs = Math.abs(5 + Math.sin(i * 3.7) * 4);
 
     ctx.strokeStyle = rgba(100, 180, 220, 0.2 + Math.sin(time + i) * 0.1);
     ctx.lineWidth = 1;
