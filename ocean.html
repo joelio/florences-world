@@ -26,7 +26,17 @@ function resize() {
   canvas.height = window.innerHeight;
 }
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); initScene(); });
+
+// Handle fullscreen transitions (macOS animates these, so we need a delay)
+function handleFullscreenResize() {
+  // Multiple attempts to catch the transition completing
+  [100, 300, 600].forEach(delay => {
+    setTimeout(() => { resize(); initScene(); }, delay);
+  });
+}
+document.addEventListener('fullscreenchange', handleFullscreenResize);
+document.addEventListener('webkitfullscreenchange', handleFullscreenResize);
 
 // --- Constants ---
 const MAX_ENTITIES = 50;
@@ -211,7 +221,6 @@ function initScene() {
 }
 
 initScene();
-window.addEventListener('resize', () => { initScene(); });
 
 // ============================================================
 // DRAWING HELPERS
